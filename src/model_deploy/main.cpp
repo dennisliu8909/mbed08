@@ -2,6 +2,10 @@
 #include "config.h"
 #include "magic_wand_model_data.h"
 
+#include "mbed_rpc.h"
+#include "mbed.h"
+#include "uLCD_4DGL.h"
+
 #include "tensorflow/lite/c/common.h"
 #include "tensorflow/lite/micro/kernels/micro_ops.h"
 #include "tensorflow/lite/micro/micro_error_reporter.h"
@@ -10,11 +14,60 @@
 #include "tensorflow/lite/schema/schema_generated.h"
 #include "tensorflow/lite/version.h"
 
+using namespace std::chrono;
+
 // Create an area of memory to use for input, output, and intermediate arrays.
 // The size of this will depend on the model you're using, and may need to be
 // determined by experimentation.
+
+
+/////
+uLCD_4DGL uLCD(D1, D0, D2);
+/////
+
+Thread thread1;
+DigitalOut led1(LED1);
+int angle = 30;
+
+/////
+
 constexpr int kTensorArenaSize = 60 * 1024;
 uint8_t tensor_arena[kTensorArenaSize];
+
+/////
+
+void UI_mode(Arguments *in, Reply *out);
+void gesture_mode();
+RPCFunction UI_gesture(&UI_mode, "UI_mode");
+BufferedSerial pc(USBTX, USBRX);
+
+/////
+
+int main() {
+  ///////
+  uLCD.text_width(4);
+  uLCD.text_height(4);
+  uLCD.locate(1,2);
+  ///////
+  char buf[256], outbuf[256];
+
+   FILE *devin = fdopen(&pc, "r");
+   FILE *devout = fdopen(&pc, "w");
+
+   while (true) {
+      memset(buf, 0, 256);      // clear buffer
+      for(int i=0; i<255; i++) {
+         char recv = fgetc(devin);
+         if (recv == '\r' || recv == '\n') {
+            printf("\r\n");
+            break;
+         }
+         buf[i] = fputc(recv, devout);
+      }
+      RPC::call(buf, outbuf);
+      printf("%s\r\n", outbuf);
+   }
+}
 
 // Return the result of the last prediction
 int PredictGesture(float* output) {
@@ -56,7 +109,12 @@ int PredictGesture(float* output) {
   return this_predict;
 }
 
-int main(int argc, char* argv[]) {
+void UI_mode(Arguments *in, Reply *out){
+    thread1.start(gesture_mode);
+    led1 = 1;
+}
+
+void gesture_mode() {
 
   // Whether we should clear the buffer next time we fetch data
   bool should_clear_buffer = false;
@@ -77,7 +135,7 @@ int main(int argc, char* argv[]) {
         "Model provided is schema version %d not equal "
         "to supported version %d.",
         model->version(), TFLITE_SCHEMA_VERSION);
-    return -1;
+    return;
   }
 
   // Pull in only the operation implementations we need.
@@ -115,7 +173,7 @@ int main(int argc, char* argv[]) {
       (model_input->dims->data[2] != kChannelNumber) ||
       (model_input->type != kTfLiteFloat32)) {
     error_reporter->Report("Bad input tensor parameters in model");
-    return -1;
+    return;
   }
 
   int input_length = model_input->bytes / sizeof(float);
@@ -123,7 +181,7 @@ int main(int argc, char* argv[]) {
   TfLiteStatus setup_status = SetupAccelerometer(error_reporter);
   if (setup_status != kTfLiteOk) {
     error_reporter->Report("Set up failed\n");
-    return -1;
+    return;
   }
 
   error_reporter->Report("Set up successful...\n");
@@ -156,7 +214,22 @@ int main(int argc, char* argv[]) {
 
     // Produce an output
     if (gesture_index < label_num) {
-      error_reporter->Report(config.output_message[gesture_index]);
+      // error_reporter->Report(config.output_message[gesture_index]);
+      printf("%d\n", gesture_index);
+      if (gesture_index == 0) {
+        angle += 5;
+        uLCD.locate(1,2);
+        uLCD.printf("%d\n", angle);
+      }
+      else if (gesture_index == 1) {
+        angle += 10;
+        uLCD.locate(1,2);
+        uLCD.printf("%d\n", angle);
+      }
+      else if (gesture_index == 2) {
+        uLCD.locate(1,2);
+        uLCD.printf("%d\n", angle);
+      }
     }
   }
 }
